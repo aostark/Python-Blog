@@ -1,6 +1,6 @@
-from flask import Blueprint, render_template, request, flash, redirect, url_for
+from flask import Blueprint, render_template, request, flash, redirect, url_for, jsonify
 from flask_login import login_required, current_user
-from .models import Post, User
+from .models import Post, User, Comment, Like
 from . import db
 
 views = Blueprint("views", __name__)
@@ -56,5 +56,60 @@ def posts(username):
         flash("No user with that username exists.", category="error")
         return redirect(url_for("views.home"))
 
-    posts = Post.query.filter_by(author=user.id).all()  # gets all of the post by a certain user
+    posts = user.posts  # gets all of the post by a certain user
     return render_template("posts.html", user=current_user, posts=posts, username=username)
+
+
+@views.route("/create-comment/<post_id>", methods=["POST"])
+@login_required
+def create_comment(post_id):
+    text = request.form.get("text")
+
+    if not text:
+        flash("Comment cannot be empty.", category="error")
+    else:
+        post = Post.query.filter_by(id=post_id)
+
+        if post:
+            comment = Comment(text=text, author=current_user.id, post_id=post_id)  # grabs text, username and post id
+            db.session.add(comment)
+            db.session.commit()  # saves it to the database
+        else:
+            flash("Post does not exist.", category="error")
+
+    return redirect(url_for("views.home"))
+
+
+@views.route("/delete-comment/<comment_id>")
+@login_required
+def delete_comment(comment_id):
+    comment = Comment.query.filter_by(id=comment_id).first()
+
+    if not comment:
+        flash("Comment does not exist.", category="error")
+    elif current_user.id != comment.author and current_user != comment.post.author:
+        flash("You do not have permission to delete this comment", category="error")
+    else:
+        db.session.delete(comment)
+        db.session.commit()
+
+    return redirect(url_for("views.home"))
+
+
+@views.route("/like-post/<post_id>", methods=["POST"])
+@login_required
+def like(post_id):
+    post = Post.query.filter_by(id=post_id).first()  # check if post exists
+    like = Like.query.filter_by(author=current_user.id, post_id=post_id).first()  # check if user already liked the post
+
+    if not post:
+        return jsonify({"error": "Post does not exist."}, 400)
+    elif like:
+        db.session.delete(like)
+        db.session.commit()
+    else:
+        like = Like(author=current_user.id, post_id=post_id)
+        db.session.add(like)
+        db.session.commit()
+
+    return jsonify({"likes": len(post.likes), "liked": current_user.id in map(lambda x: x.author, post.likes)})
